@@ -29,9 +29,12 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.preference.PreferenceManager;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
@@ -41,16 +44,18 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import org.restcomm.android.olympus.Util.Utils;
 import org.restcomm.android.sdk.RCClient;
 import org.restcomm.android.sdk.RCConnection;
 import org.restcomm.android.sdk.RCDevice;
 import org.restcomm.android.sdk.RCDeviceListener;
-import org.restcomm.android.sdk.RCPresenceEvent;
 import org.restcomm.android.sdk.util.RCException;
 
 import java.util.HashMap;
+import java.util.Locale;
 
 public class MessageActivity extends AppCompatActivity
       implements MessageFragment.Callbacks, RCDeviceListener,
@@ -66,8 +71,14 @@ public class MessageActivity extends AppCompatActivity
    private String currentPeer;
    private String fullPeer;
 
+   // Timer that starts if there's a live call on another Activity and periodically checks if the call is over to update the UI
+   // TODO: need to improve this from polling to event based but we need to think in terms of general SDK API. Let's leave it like
+   // this for now and we will revisit
+   private Handler timerHandler = new Handler();
+
    ImageButton btnSend;
    EditText txtMessage;
+   TextView lblOngoingCall;
    public static String ACTION_OPEN_MESSAGE_SCREEN = "org.restcomm.android.olympus.ACTION_OPEN_MESSAGE_SCREEN";
    public static String EXTRA_CONTACT_NAME = "org.restcomm.android.olympus.EXTRA_CONTACT_NAME";
 
@@ -103,6 +114,8 @@ public class MessageActivity extends AppCompatActivity
       btnSend.setOnClickListener(this);
       txtMessage = (EditText) findViewById(R.id.text_message);
       txtMessage.setOnClickListener(this);
+      lblOngoingCall = findViewById(R.id.resume_call);
+      lblOngoingCall.setOnClickListener(this);
 
       fullPeer = getIntent().getStringExtra(RCDevice.EXTRA_DID);
       // keep on note of the current peer we are texting with
@@ -117,7 +130,6 @@ public class MessageActivity extends AppCompatActivity
       // The activity is about to become visible.
       Log.i(TAG, "%% onStart");
 
-      //handleCall(getIntent());
       bindService(new Intent(this, RCDevice.class), this, Context.BIND_AUTO_CREATE);
    }
 
@@ -151,6 +163,14 @@ public class MessageActivity extends AppCompatActivity
       super.onStop();
       // The activity is no longer visible (it is now "stopped")
       Log.i(TAG, "%% onStop");
+
+      if (lblOngoingCall.getVisibility() != View.GONE) {
+         lblOngoingCall.setVisibility(View.GONE);
+
+         if (timerHandler != null) {
+            timerHandler.removeCallbacksAndMessages(null);
+         }
+      }
 
       // Unbind from the service
       if (serviceBound) {
@@ -190,6 +210,33 @@ public class MessageActivity extends AppCompatActivity
       // We've bound to LocalService, cast the IBinder and get LocalService instance
       RCDevice.RCDeviceBinder binder = (RCDevice.RCDeviceBinder) service;
       device = binder.getService();
+
+      if (device.isInitialized()) {
+         RCConnection connection = device.getLiveConnection();
+         if (connection != null) {
+            // we have a live connection ongoing, need to update UI so that it can be resumed
+            lblOngoingCall.setText(String.format("%s %s", getString(R.string.resume_ongoing_call_text), connection.getPeer()));
+            lblOngoingCall.setVisibility(View.VISIBLE);
+            startTimer();
+         }
+      }
+      else {
+         Log.i(TAG, "RCDevice not initialized; initializing");
+         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
+         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+
+         HashMap<String, Object> params = Utils.createParameters(prefs, this);
+
+         // If exception is raised, we will close activity only if it comes from login
+         // otherwise we will just show the error dialog
+         device.setLogLevel(Log.VERBOSE);
+         try {
+            device.initialize(getApplicationContext(), params, this);
+         } catch (RCException e) {
+            showOkAlert("RCDevice Initialization Error", e.errorText);
+         }
+
+      }
 
       // needed if we are returning from Message screen that becomes the Device listener
       device.setDeviceListener(this);
@@ -251,7 +298,7 @@ public class MessageActivity extends AppCompatActivity
    }
 
    /**
-    * Main Activity onClick
+    * Message Activity onClick
     */
    public void onClick(View view)
    {
@@ -271,6 +318,11 @@ public class MessageActivity extends AppCompatActivity
             showOkAlert("RCDevice Error", "No Wifi connectivity");
          }
       }
+      else if (view.getId() == R.id.resume_call) {
+         Intent intent = new Intent(this, CallActivity.class);
+         intent.setAction(RCDevice.ACTION_RESUME_CALL);
+         startActivity(intent);
+      }
    }
 
    /**
@@ -279,14 +331,26 @@ public class MessageActivity extends AppCompatActivity
    public void onInitialized(RCDevice device, RCDeviceListener.RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
    {
       Log.i(TAG, "%% onInitialized");
+      if (statusCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         handleConnectivityUpdate(connectivityStatus, "RCDevice successfully initialized, using: " + connectivityStatus);
+      }
+      else if (statusCode == RCClient.ErrorCodes.ERROR_DEVICE_NO_CONNECTIVITY.ordinal()) {
+         // This is not really an error, since if connectivity comes back the RCDevice will resume automatically
+         handleConnectivityUpdate(connectivityStatus, null);
+      }
+      else {
+         if (!isFinishing()) {
+            showOkAlert("RCDevice Initialization Error", statusText);
+         }
+      }
    }
 
-   public void onStartListening(RCDevice device, RCConnectivityStatus connectivityStatus)
+   public void onReconfigured(RCDevice device, RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
    {
-      Log.i(TAG, "%% onStartListening");
+      Log.i(TAG, "%% onReconfigured");
    }
 
-   public void onStopListening(RCDevice device, int errorCode, String errorText)
+   public void onError(RCDevice device, int errorCode, String errorText)
    {
       if (errorCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
          handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice: " + errorText);
@@ -307,20 +371,7 @@ public class MessageActivity extends AppCompatActivity
    {
       Log.i(TAG, "onMessageSent(): statusCode: " + statusCode + ", statusText: " + statusText);
 
-      //Integer index = indexes.get(jobId);
-
       listFragment.updateMessageDeliveryStatus(jobId, statusCode, currentPeer);
-      /*
-      if (statusCode != RCClient.ErrorCodes.SUCCESS.ordinal()) {
-         //listView.getAdapter().getItem(index);
-         //messageTextView.setTextColor(ContextCompat.getColor(this, R.color.colorError));
-      }
-      else {
-         //messageTextView.setTextColor(ContextCompat.getColor(this, R.color.colorTextSecondary));
-      }
-      */
-
-      //indexes.remove(jobId);
    }
 
    public void onReleased(RCDevice device, int statusCode, String statusText)
@@ -329,8 +380,11 @@ public class MessageActivity extends AppCompatActivity
          showOkAlert("RCDevice Error", statusText);
       }
 
-      unbindService(this);
-      serviceBound = false;
+      //maybe we stopped the activity before onReleased is called
+      if (serviceBound) {
+         unbindService(this);
+         serviceBound = false;
+      }
    }
 
    /**
@@ -372,25 +426,32 @@ public class MessageActivity extends AppCompatActivity
       // automatically handle clicks on the Home/Up button, so long
       // as you specify a parent activity in AndroidManifest.xml.
       int id = item.getItemId();
-      if (id == R.id.action_video_call) {
-         Intent intent = new Intent(this, CallActivity.class);
-         intent.setAction(RCDevice.ACTION_OUTGOING_CALL);
-         intent.putExtra(RCDevice.EXTRA_DID, fullPeer);
-         intent.putExtra(RCDevice.EXTRA_VIDEO_ENABLED, true);
-         startActivity(intent);
+      if (device.getState() == RCDevice.DeviceState.READY) {
+         if (id == R.id.action_video_call) {
+            Intent intent = new Intent(this, CallActivity.class);
+            intent.setAction(RCDevice.ACTION_OUTGOING_CALL);
+            intent.putExtra(RCDevice.EXTRA_DID, fullPeer);
+            intent.putExtra(RCDevice.EXTRA_VIDEO_ENABLED, true);
+            startActivity(intent);
+         }
+         if (id == R.id.action_audio_call) {
+            Intent intent = new Intent(this, CallActivity.class);
+            intent.setAction(RCDevice.ACTION_OUTGOING_CALL);
+            intent.putExtra(RCDevice.EXTRA_DID, fullPeer);
+            intent.putExtra(RCDevice.EXTRA_VIDEO_ENABLED, false);
+            startActivity(intent);
+         }
       }
-      if (id == R.id.action_audio_call) {
-         Intent intent = new Intent(this, CallActivity.class);
-         intent.setAction(RCDevice.ACTION_OUTGOING_CALL);
-         intent.putExtra(RCDevice.EXTRA_DID, fullPeer);
-         intent.putExtra(RCDevice.EXTRA_VIDEO_ENABLED, false);
-         startActivity(intent);
+      else if (device.getState() == RCDevice.DeviceState.BUSY) {
+         showOkAlert("RCDevice is busy", "Call already ongoing, please hang up first if you want to start a new one");
       }
+
       return super.onOptionsItemSelected(item);
    }
 
    public void handleConnectivityUpdate(RCConnectivityStatus connectivityStatus, String text)
    {
+
       if (text == null) {
          if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusNone) {
             text = "RCDevice connectivity change: Lost connectivity";
@@ -415,6 +476,24 @@ public class MessageActivity extends AppCompatActivity
       }
 
       Toast.makeText(getApplicationContext(), text, Toast.LENGTH_LONG).show();
+   }
+
+   public void startTimer() {
+      timerHandler.removeCallbacksAndMessages(null);
+      // schedule a registration update after 'registrationRefresh' seconds
+      Runnable timerRunnable = new Runnable() {
+         @Override
+         public void run() {
+            if (device != null && device.isInitialized() && (device.getLiveConnection() == null)) {
+               if (lblOngoingCall.getVisibility() != View.GONE) {
+                  lblOngoingCall.setVisibility(View.GONE);
+                  return;
+               }
+            }
+            startTimer();
+         }
+      };
+      timerHandler.postDelayed(timerRunnable, 1000);
    }
 
 }

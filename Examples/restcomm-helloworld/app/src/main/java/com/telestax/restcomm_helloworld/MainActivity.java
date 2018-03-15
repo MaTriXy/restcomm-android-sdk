@@ -161,12 +161,13 @@ public class MainActivity extends Activity implements RCDeviceListener, RCConnec
       params.put(RCDevice.ParameterKeys.SIGNALING_DOMAIN, "");
       params.put(RCDevice.ParameterKeys.SIGNALING_USERNAME, "android-sdk");
       params.put(RCDevice.ParameterKeys.SIGNALING_PASSWORD, "1234");
-      params.put(RCDevice.ParameterKeys.MEDIA_ICE_URL, "https://service.xirsys.com/ice");
+      params.put(RCDevice.ParameterKeys.MEDIA_ICE_URL, "https://es.xirsys.com/_turn");
       params.put(RCDevice.ParameterKeys.MEDIA_ICE_DOMAIN, "cloud.restcomm.com");
       params.put(RCDevice.ParameterKeys.MEDIA_ICE_USERNAME, "atsakiridis");
       params.put(RCDevice.ParameterKeys.MEDIA_ICE_PASSWORD, "4e89a09e-bf6f-11e5-a15c-69ffdcc2b8a7");
       params.put(RCDevice.ParameterKeys.MEDIA_TURN_ENABLED, true);
-      //params.put(RCDevice.ParameterKeys.SIGNALING_SECURE_ENABLED, prefs.getBoolean(RCDevice.ParameterKeys.SIGNALING_SECURE_ENABLED, false));
+      params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE,1);
+      params.put(RCDevice.ParameterKeys.SIGNALING_SECURE_ENABLED, true);
 
       // The SDK provides the user with default sounds for calling, ringing, busy (declined) and message, but the user can override them
       // by providing their own resource files (i.e. .wav, .mp3, etc) at res/raw passing them with Resource IDs like R.raw.user_provided_calling_sound
@@ -334,12 +335,23 @@ public class MainActivity extends Activity implements RCDeviceListener, RCConnec
    {
    }
 
+   @Override
+   public void onError(RCDevice device, int statusCode, String statusText) {
+
+   }
+
    public void onReleased(RCDevice device, int statusCode, String statusText)
    {
    }
 
    public void onInitialized(RCDevice device, RCDeviceListener.RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
    {
+      Log.i(TAG, "onInitialized");
+   }
+
+   @Override
+   public void onReconfigured(RCDevice device, RCConnectivityStatus connectivityStatus, int statusCode, String statusText) {
+
    }
 
    // Resume call after permissions are checked

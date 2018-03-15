@@ -50,12 +50,17 @@ then
 		# Need keystore file to be able to sign the .apk. Let's keep debug.keystore decryption and installation only for Travis. Locally we have a working keystore that might be confusing to update.
 		echo "-- Setting up signing for .apk"
 		# We need the debug.keystore in order to be able to build a debug .apk
-		echo "-- Decrypting signing keystore"
-		openssl aes-256-cbc -k "$FILE_ENCRYPTION_PASSWORD" -in scripts/keystore/${DEVELOPMENT_KEYSTORE}.enc -d -a -out scripts/certs/${DEVELOPMENT_KEYSTORE} || exit 1
+		echo "-- Decrypting and installing signing keystore for development builds"
+		openssl aes-256-cbc -k "$FILE_ENCRYPTION_PASSWORD" -in scripts/keystore/${DEVELOPMENT_KEYSTORE}.enc -d -a -out ~/.android/${DEVELOPMENT_KEYSTORE} || exit 1
 
-		echo "-- Installing keystore"
+		echo "-- Decrypting and installing signing keystore for release builds"
+		mkdir -p ~/security
+		openssl aes-256-cbc -k "$FILE_ENCRYPTION_PASSWORD" -in scripts/configuration/${RELEASE_KEYSTORE}.enc -d -a -out ~/security/${RELEASE_KEYSTORE} || exit 1
+
+
+		#echo "-- Installing keystore"
 		# Overwrite default keystore file only in travis
-		cp scripts/certs/${DEVELOPMENT_KEYSTORE} ~/.android/${DEVELOPMENT_KEYSTORE} || exit 1
-		rm scripts/certs/${DEVELOPMENT_KEYSTORE} || exit 1
+		#cp scripts/certs/${DEVELOPMENT_KEYSTORE}  || exit 1
+		#rm scripts/certs/${DEVELOPMENT_KEYSTORE} || exit 1
 	fi
 fi

@@ -40,24 +40,28 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.MenuItem;
+import android.widget.Toast;
 
+import org.restcomm.android.olympus.Util.Utils;
+import org.restcomm.android.sdk.RCClient;
 import org.restcomm.android.sdk.RCConnection;
 import org.restcomm.android.sdk.RCDevice;
 //import org.restcomm.android.sdk.util.ErrorStruct;
-import org.restcomm.android.sdk.fcm.FcmMessages;
+import org.restcomm.android.sdk.RCDeviceListener;
 import org.restcomm.android.sdk.util.RCException;
 import org.restcomm.android.sdk.util.RCUtils;
 
 import java.util.HashMap;
 
 public class SettingsActivity extends AppCompatActivity implements SharedPreferences.OnSharedPreferenceChangeListener,
-      ServiceConnection {
+      ServiceConnection, RCDeviceListener {
    private SettingsFragment settingsFragment;
    SharedPreferences prefs;
    HashMap<String, Object> params;
    RCDevice device;
    boolean serviceBound = false;
    boolean updated;
+   boolean pushUpdated;
    private AlertDialog alertDialog;
    private static final String TAG = "SettingsActivity";
 
@@ -150,6 +154,22 @@ public class SettingsActivity extends AppCompatActivity implements SharedPrefere
       RCDevice.RCDeviceBinder binder = (RCDevice.RCDeviceBinder) service;
       device = binder.getService();
 
+      // Remember there's a chance that the user navigates to Settings and then hits home. In that case,
+      // when they come back RCDevice won't be initialized
+      if (!device.isInitialized()) {
+         Log.i(TAG, "RCDevice not initialized; initializing");
+         HashMap<String, Object> params = Utils.createParameters(prefs, this);
+
+         // If exception is raised, we will close activity only if it comes from login
+         // otherwise we will just show the error dialog
+         device.setLogLevel(Log.VERBOSE);
+         try {
+            device.initialize(getApplicationContext(), params, this);
+         } catch (RCException e) {
+            showOkAlert("RCDevice Initialization Error", e.errorText);
+         }
+      }
+
       // We have the device reference
       if (device.getState() == RCDevice.DeviceState.OFFLINE) {
          getSupportActionBar().setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.colorTextSecondary)));
@@ -176,60 +196,44 @@ public class SettingsActivity extends AppCompatActivity implements SharedPrefere
       // as you specify a parent activity in AndroidManifest.xml.
       int id = item.getItemId();
       if (id == android.R.id.home) {
-         if (updated) {
-            try {
-               // There a slight difference between the data structure of SharedPreferences and
-               // the one that the SDK understands. In SharedPreferences the value for
-               // MEDIA_ICE_SERVERS_DISCOVERY_TYPE key is a String, which the SDK wants a
-               // MediaIceServersDiscoveryType enum, so we need to convert between the 2.
-               // In this case we remove the one and introduce the other
-               HashMap<String, Object> prefHashMap = (HashMap<String, Object>) prefs.getAll();
-               String iceServersDiscoveryType = "0";
-               if (prefHashMap.containsKey(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE)) {
-                  iceServersDiscoveryType = (String) prefHashMap.get(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE);
-                  prefHashMap.remove(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE);
-               }
-               prefHashMap.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE,
-                       RCDevice.MediaIceServersDiscoveryType.values()[Integer.parseInt(iceServersDiscoveryType)]
-               );
+         try {
+            HashMap<String, Object> prefHashMap = (HashMap<String, Object>) prefs.getAll();
+            if (updated || pushUpdated) {
+                // There a slight difference between the data structure of SharedPreferences and
+                // the one that the SDK understands. In SharedPreferences the value for
+                // MEDIA_ICE_SERVERS_DISCOVERY_TYPE key is a String, which the SDK wants a
+                // MediaIceServersDiscoveryType enum, so we need to convert between the 2.
+                // In this case we remove the one and introduce the other
+                String iceServersDiscoveryType = "0";
+                if (prefHashMap.containsKey(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE)) {
+                    iceServersDiscoveryType = (String) prefHashMap.get(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE);
+                    prefHashMap.remove(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE);
+                }
+                prefHashMap.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE,
+                        RCDevice.MediaIceServersDiscoveryType.values()[Integer.parseInt(iceServersDiscoveryType)]
+                );
 
-               // Same for candidate timeout
-               String candidateTimeout = "0";
-               if (prefHashMap.containsKey(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT)) {
-                  candidateTimeout = (String) prefHashMap.get(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT);
-                  prefHashMap.remove(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT);
-               }
-               prefHashMap.put(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT,
-                       Integer.parseInt(candidateTimeout)
-               );
+                // Same for candidate timeout
+                String candidateTimeout = "0";
+                if (prefHashMap.containsKey(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT)) {
+                    candidateTimeout = (String) prefHashMap.get(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT);
+                    prefHashMap.remove(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT);
+                }
+                prefHashMap.put(RCConnection.ParameterKeys.DEBUG_CONNECTION_CANDIDATE_TIMEOUT,
+                        Integer.parseInt(candidateTimeout)
+                );
 
-               RCUtils.validateSettingsParms(prefHashMap);
-               if (!device.updateParams(params)) {
-                  // TODO:
-                  //showOkAlert("RCDevice Error", "No Wifi connectivity");
-               }
-               NavUtils.navigateUpFromSameTask(this);
+                if (device.isInitialized()) {
+                   device.reconfigure(params);
+                } else {
+                   //try to initialize with params
+                   device.initialize(this, params, this);
+                }
 
             }
-            catch (RCException e) {
-               showOkAlert("Error saving Settings", e.errorText);
-            }
-
-            /*
-            if (errorStruct.statusCode != RCClient.ErrorCodes.SUCCESS) {
-               showOkAlert("Error saving Settings", errorStruct.statusText);
-            }
-            else {
-               if (!device.updateParams(params)) {
-                  // TODO:
-                  //showOkAlert("RCDevice Error", "No Wifi connectivity");
-               }
-               NavUtils.navigateUpFromSameTask(this);
-            }
-            */
-         }
-         else {
             NavUtils.navigateUpFromSameTask(this);
+         } catch (RCException e) {
+            showOkAlert("Error saving Settings", e.errorText);
          }
 
          return true;
@@ -251,18 +255,6 @@ public class SettingsActivity extends AppCompatActivity implements SharedPrefere
       }
       else if (key.equals(RCDevice.ParameterKeys.SIGNALING_PASSWORD)) {
          params.put(RCDevice.ParameterKeys.SIGNALING_PASSWORD, prefs.getString(RCDevice.ParameterKeys.SIGNALING_PASSWORD, "1234"));
-         updated = true;
-      }
-      else if (key.equals(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_EMAIL)) {
-         params.put(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_EMAIL, prefs.getString(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_EMAIL, "administrator@company.com"));
-         updated = true;
-      }
-      else if (key.equals(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_PASSWORD)) {
-         params.put(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_PASSWORD, prefs.getString(FcmMessages.ParameterKeys.RESTCOMM_ACCOUNT_PASSWORD, ""));
-         updated = true;
-      }
-      else if (key.equals(FcmMessages.ParameterKeys.PUSH_NOTIFICATION_DOMAIN)) {
-         params.put(FcmMessages.ParameterKeys.PUSH_NOTIFICATION_DOMAIN, prefs.getString(FcmMessages.ParameterKeys.PUSH_NOTIFICATION_DOMAIN, "push.restcomm.com"));
          updated = true;
       }
       else if (key.equals(RCDevice.ParameterKeys.MEDIA_TURN_ENABLED)) {
@@ -342,6 +334,31 @@ public class SettingsActivity extends AppCompatActivity implements SharedPrefere
          }
          updated = true;
       }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT, prefs.getBoolean(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT,false));
+         pushUpdated = true;
+      }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_EMAIL)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_EMAIL, prefs.getString(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_EMAIL, ""));
+         pushUpdated = true;
+      }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_PASSWORD)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_PASSWORD, prefs.getString(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ACCOUNT_PASSWORD, ""));
+         pushUpdated = true;
+      }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_PUSH_DOMAIN)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_PUSH_DOMAIN, prefs.getString(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_PUSH_DOMAIN, ""));
+         pushUpdated = true;
+      }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_HTTP_DOMAIN)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_HTTP_DOMAIN, prefs.getString(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_HTTP_DOMAIN, ""));
+         pushUpdated = true;
+      }
+      else if (key.equals(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT)) {
+         params.put(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT, prefs.getBoolean(RCDevice.ParameterKeys.PUSH_NOTIFICATIONS_ENABLE_PUSH_FOR_ACCOUNT, false));
+         updated = true;
+      }
+
    }
 
    private void showOkAlert(final String title, final String detail)
@@ -366,5 +383,93 @@ public class SettingsActivity extends AppCompatActivity implements SharedPrefere
       return summary;
    }
 
+
+   /**
+    * RCDeviceListener callbacks
+    */
+   public void onInitialized(RCDevice device, RCDeviceListener.RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
+   {
+      Log.i(TAG, "%% onInitialized");
+      if (statusCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         handleConnectivityUpdate(connectivityStatus, "RCDevice successfully initialized, using: " + connectivityStatus);
+      }
+      else if (statusCode == RCClient.ErrorCodes.ERROR_DEVICE_NO_CONNECTIVITY.ordinal()) {
+         // This is not really an error, since if connectivity comes back the RCDevice will resume automatically
+         handleConnectivityUpdate(connectivityStatus, null);
+      }
+      else {
+         if (!isFinishing()) {
+            showOkAlert("RCDevice Initialization Error", statusText);
+         }
+      }
+   }
+
+   public void onReconfigured(RCDevice device, RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
+   {
+      Log.i(TAG, "%% onReconfigured");
+   }
+
+   public void onError(RCDevice device, int errorCode, String errorText)
+   {
+      if (errorCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice: " + errorText);
+      }
+      else {
+         handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice Error: " + errorText);
+      }
+   }
+
+   public void onConnectivityUpdate(RCDevice device, RCConnectivityStatus connectivityStatus)
+   {
+      Log.i(TAG, "%% onConnectivityUpdate");
+
+      handleConnectivityUpdate(connectivityStatus, null);
+   }
+
+   public void onMessageSent(RCDevice device, int statusCode, String statusText, String jobId)
+   {
+      Log.i(TAG, "onMessageSent(): statusCode: " + statusCode + ", statusText: " + statusText);
+   }
+
+   public void onReleased(RCDevice device, int statusCode, String statusText)
+   {
+      if (statusCode != RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         showOkAlert("RCDevice Error", statusText);
+      }
+
+      //maybe we stopped the activity before onReleased is called
+      if (serviceBound) {
+         unbindService(this);
+         serviceBound = false;
+      }
+   }
+
+   public void handleConnectivityUpdate(RCConnectivityStatus connectivityStatus, String text)
+   {
+      if (text == null) {
+         if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusNone) {
+            text = "RCDevice connectivity change: Lost connectivity";
+         }
+         if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusWiFi) {
+            text = "RCDevice connectivity change: Reestablished connectivity (Wifi)";
+         }
+         if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusCellular) {
+            text = "RCDevice connectivity change: Reestablished connectivity (Cellular)";
+         }
+         if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusEthernet) {
+            text = "RCDevice connectivity change: Reestablished connectivity (Ethernet)";
+         }
+
+      }
+
+      if (connectivityStatus == RCConnectivityStatus.RCConnectivityStatusNone) {
+         getSupportActionBar().setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.colorTextSecondary)));
+      }
+      else {
+         getSupportActionBar().setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.colorPrimary)));
+      }
+
+      Toast.makeText(getApplicationContext(), text, Toast.LENGTH_LONG).show();
+   }
 
 }

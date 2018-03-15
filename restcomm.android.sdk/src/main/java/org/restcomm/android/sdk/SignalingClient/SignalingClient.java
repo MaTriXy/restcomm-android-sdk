@@ -24,12 +24,12 @@ package org.restcomm.android.sdk.SignalingClient;
 
 import android.content.Context;
 import android.os.Handler;
-import android.os.Looper;
 import android.os.Message;
+import android.util.Log;
 
 import org.restcomm.android.sdk.RCClient;
 import org.restcomm.android.sdk.RCDeviceListener;
-//import org.restcomm.android.sdk.RCMessage;
+import org.restcomm.android.sdk.util.RCException;
 import org.restcomm.android.sdk.util.RCLogger;
 
 import java.util.HashMap;
@@ -56,6 +56,9 @@ import java.util.HashMap;
  * that handles them by dispatching them to JainSipClient that encapsulates JAIN SIP. When a response/event comes in from JAIN SIP to JainSipClient
  * the reverse happens: a message is created from the Signaling thread to the UI thread and after it is received at handleMessage() the respective
  * listener callback is used to notify the UI.
+ *
+ * Note: Although it would make sense to make SignalingClient static in order to accommodate some improvements over the current design, the problem is that
+ * we need an object to extend Handler and we definitely need SignalingClient to also be a Handler.
  */
 public class SignalingClient extends Handler {
 
@@ -142,12 +145,12 @@ public class SignalingClient extends Handler {
    private static boolean initialized = false;
 
    // private constructor to avoid client applications to use constructor
-   public SignalingClient()
+   public SignalingClient() throws RCException
    {
       super();
 
       if (initialized) {
-         throw new RuntimeException("SignalingClient already initialized");
+         throw new RCException(RCClient.ErrorCodes.ERROR_DEVICE_SIGNALING_FACILITIES_ALREADY_INITIALIZED);
       }
 
       // create signaling handler thread and handler/signal
@@ -184,7 +187,6 @@ public class SignalingClient extends Handler {
 
       Message message = signalingHandler.obtainMessage(1, signalingMessage);
       message.sendToTarget();
-
       return jobId;
    }
 
@@ -324,28 +326,34 @@ public class SignalingClient extends Handler {
 
       RCLogger.i(TAG, "handleMessage: type: " + message.type + ", jobId: " + message.jobId);
 
-      if (message.type == SignalingMessage.MessageType.OPEN_REPLY) {
+      if (message.type == SignalingMessage.MessageType.OPEN_REPLY && listener != null) {
          listener.onOpenReply(message.jobId, message.connectivityStatus, message.status, message.text);
       }
       else if (message.type == SignalingMessage.MessageType.CLOSE_REPLY) {
          signalingHandlerThread.quit();
          initialized = false;
          //closePending = false;
-         listener.onCloseReply(message.jobId, message.status, message.text);
+         if (listener != null) {
+            listener.onCloseReply(message.jobId, message.status, message.text);
+         }
+
       }
       else if (message.type == SignalingMessage.MessageType.RECONFIGURE_REPLY) {
-         listener.onReconfigureReply(message.jobId, message.connectivityStatus, message.status, message.text);
+         if (listener != null) {
+            listener.onReconfigureReply(message.jobId, message.connectivityStatus, message.status, message.text);
+         }
+
       }
-      else if (message.type == SignalingMessage.MessageType.ERROR_EVENT) {
+      else if (message.type == SignalingMessage.MessageType.ERROR_EVENT && listener != null) {
          listener.onErrorEvent(message.jobId, message.connectivityStatus, message.status, message.text);
       }
-      else if (message.type == SignalingMessage.MessageType.CONNECTIVITY_EVENT) {
+      else if (message.type == SignalingMessage.MessageType.CONNECTIVITY_EVENT  && listener != null) {
          listener.onConnectivityEvent(message.jobId, message.connectivityStatus);
       }
-      else if (message.type == SignalingMessage.MessageType.MESSAGE_INCOMING_EVENT) {
+      else if (message.type == SignalingMessage.MessageType.MESSAGE_INCOMING_EVENT  && listener != null) {
          listener.onMessageArrivedEvent(message.jobId, message.peer, message.messageText);
       }
-      else if (message.type == SignalingMessage.MessageType.MESSAGE_REPLY) {
+      else if (message.type == SignalingMessage.MessageType.MESSAGE_REPLY  && listener != null) {
          /*
          RCMessage rcMessage = messages.get(message.jobId);
          if (rcMessage == null) {
@@ -356,7 +364,7 @@ public class SignalingClient extends Handler {
          */
          listener.onMessageReply(message.jobId, message.status, message.text);
       }
-      else if (message.type == SignalingMessage.MessageType.REGISTERING_EVENT) {
+      else if (message.type == SignalingMessage.MessageType.REGISTERING_EVENT  && listener != null) {
          listener.onRegisteringEvent(message.jobId);
       }
       // Call related events

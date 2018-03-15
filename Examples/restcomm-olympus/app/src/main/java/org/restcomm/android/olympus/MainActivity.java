@@ -36,6 +36,7 @@ import android.content.res.Configuration;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
 import android.preference.PreferenceManager;
 import android.support.design.widget.FloatingActionButton;
@@ -45,31 +46,28 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.TextView;
 import android.widget.Toast;
 import com.testfairy.TestFairy;
 //import net.hockeyapp.android.CrashManager;
 //import net.hockeyapp.android.UpdateManager;
 
-import org.apache.log4j.chainsaw.Main;
+import org.restcomm.android.olympus.Util.Utils;
 import org.restcomm.android.sdk.RCClient;
 import org.restcomm.android.sdk.RCConnection;
 import org.restcomm.android.sdk.RCDevice;
 import org.restcomm.android.sdk.RCDeviceListener;
 import org.restcomm.android.sdk.util.RCException;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 import static org.restcomm.android.olympus.ContactsController.CONTACT_KEY;
 import static org.restcomm.android.olympus.ContactsController.CONTACT_VALUE;
 
 public class MainActivity extends AppCompatActivity
       implements MainFragment.Callbacks, RCDeviceListener,
-      View.OnClickListener, SharedPreferences.OnSharedPreferenceChangeListener,
-      AddUserDialogFragment.ContactDialogListener, ServiceConnection, ComponentCallbacks,
-      ComponentCallbacks2 {
+      View.OnClickListener, AddUserDialogFragment.ContactDialogListener,
+      ServiceConnection, ComponentCallbacks, ComponentCallbacks2 {
 
    private RCDevice device = null;
    boolean serviceBound = false;
@@ -85,7 +83,14 @@ public class MainActivity extends AppCompatActivity
    private RCConnectivityStatus previousConnectivityStatus = RCConnectivityStatus.RCConnectivityStatusNone;
    private static final String APP_VERSION = "Restcomm Android Olympus Client " + BuildConfig.VERSION_NAME + "#" + BuildConfig.VERSION_CODE; //"Restcomm Android Olympus Client 1.0.0-BETA4#20";
    FloatingActionButton btnAdd;
+   TextView lblOngoingCall;
    public static String ACTION_DISCONNECTED_BACKGROUND = "org.restcomm.android.olympus.ACTION_DISCONNECTED_BACKGROUND";
+
+   // Timer that starts if there's a live call on another Activity and periodically checks if the call is over to update the UI
+   // TODO: need to improve this from polling to event based but we need to think in terms of general SDK API. Let's leave it like
+   // this for now and we will revisit
+   private Handler timerHandler = new Handler();
+
 
    private static final int CONNECTION_REQUEST = 1;
 
@@ -114,14 +119,13 @@ public class MainActivity extends AppCompatActivity
 
       btnAdd = (FloatingActionButton) findViewById(R.id.imageButton_add);
       btnAdd.setOnClickListener(this);
+      lblOngoingCall = findViewById(R.id.resume_call);
+      lblOngoingCall.setOnClickListener(this);
 
       alertDialog = new AlertDialog.Builder(MainActivity.this, R.style.SimpleAlertStyle).create();
 
       PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
       prefs = PreferenceManager.getDefaultSharedPreferences(this);
-
-      // preferences
-      prefs.registerOnSharedPreferenceChangeListener(this);
 
       // No longer needed, we'll change with toast
       // set it to wifi by default to avoid the status message when starting with wifi
@@ -156,6 +160,10 @@ public class MainActivity extends AppCompatActivity
    protected void onPause()
    {
       super.onPause();
+      if (alertDialog.isShowing()) {
+         Log.w(TAG, "Alert already showing, hiding to show new alert");
+         alertDialog.dismiss();
+      }
       // Another activity is taking focus (this activity is about to be "paused").
       Log.i(TAG, "%% onPause");
    }
@@ -166,6 +174,14 @@ public class MainActivity extends AppCompatActivity
       super.onStop();
       // The activity is no longer visible (it is now "stopped")
       Log.i(TAG, "%% onStop");
+
+      if (lblOngoingCall.getVisibility() != View.GONE) {
+         lblOngoingCall.setVisibility(View.GONE);
+
+         if (timerHandler != null) {
+            timerHandler.removeCallbacksAndMessages(null);
+         }
+      }
 
       // Unbind from the service
       if (serviceBound) {
@@ -185,7 +201,6 @@ public class MainActivity extends AppCompatActivity
       RCClient.shutdown();
       device = null;
       */
-      prefs.unregisterOnSharedPreferenceChangeListener(this);
    }
 
    /*
@@ -221,7 +236,7 @@ public class MainActivity extends AppCompatActivity
       super.onNewIntent(intent);
 
       // We get this intent from CallActivity, when the App is in the background and the user has requested hangup via notification
-      // In that case we don't wont to interrupt the user from what they are currently doing in the foreground, so we just finish()
+      // In that case we don't want to interrupt the user from what they are currently doing in the foreground, so we just finish()
       if (intent.getAction() != null && intent.getAction().equals(ACTION_DISCONNECTED_BACKGROUND)) {
          finish();
       }
@@ -237,66 +252,29 @@ public class MainActivity extends AppCompatActivity
       device = binder.getService();
 
       if (!device.isInitialized()) {
-         HashMap<String, Object> params = new HashMap<String, Object>();
-         params.put(RCDevice.ParameterKeys.INTENT_INCOMING_CALL, new Intent(RCDevice.ACTION_INCOMING_CALL, null, getApplicationContext(), CallActivity.class));
-         params.put(RCDevice.ParameterKeys.INTENT_INCOMING_MESSAGE, new Intent(RCDevice.ACTION_INCOMING_MESSAGE, null, getApplicationContext(), MessageActivity.class));
-         params.put(RCDevice.ParameterKeys.SIGNALING_DOMAIN, prefs.getString(RCDevice.ParameterKeys.SIGNALING_DOMAIN, ""));
-         params.put(RCDevice.ParameterKeys.SIGNALING_USERNAME, prefs.getString(RCDevice.ParameterKeys.SIGNALING_USERNAME, "android-sdk"));
-         params.put(RCDevice.ParameterKeys.SIGNALING_PASSWORD, prefs.getString(RCDevice.ParameterKeys.SIGNALING_PASSWORD, "1234"));
+         HashMap<String, Object> params = Utils.createParameters(prefs, getApplicationContext());
 
-         // Choose an ICE discovery type
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE,
-                 RCDevice.MediaIceServersDiscoveryType.values()[Integer.parseInt(prefs.getString(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE, "0"))]
-         );
-
-         //params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE, RCDevice.MediaIceServersDiscoveryType.ICE_SERVERS_CONFIGURATION_URL_XIRSYS_V3);
-         //params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE, RCDevice.MediaIceServersDiscoveryType.ICE_SERVERS_CONFIGURATION_URL_XIRSYS_V3);
-         //params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS_DISCOVERY_TYPE, RCDevice.MediaIceServersDiscoveryType.ICE_SERVERS_CUSTOM);
-
-         // Media ICE url is a bit different between V2 and V3. Here are some examples:
-         // - For Xirsys V2: https://service.xirsys.com/ice
-         // - For Xirsys V3: https://es.xirsys.com/_turn/
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_URL, prefs.getString(RCDevice.ParameterKeys.MEDIA_ICE_URL, ""));
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_USERNAME, prefs.getString(RCDevice.ParameterKeys.MEDIA_ICE_USERNAME, ""));
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_PASSWORD, prefs.getString(RCDevice.ParameterKeys.MEDIA_ICE_PASSWORD, ""));
-         // V2 Domains are called Channels in V3 organization, but we use the same key in both of them: MEDIA_ICE_DOMAIN
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_DOMAIN, prefs.getString(RCDevice.ParameterKeys.MEDIA_ICE_DOMAIN, ""));
-         params.put(RCDevice.ParameterKeys.MEDIA_TURN_ENABLED, prefs.getBoolean(RCDevice.ParameterKeys.MEDIA_TURN_ENABLED, true));
-
-         /*
-         // If MEDIA_ICE_SERVERS_DISCOVERY_TYPE is ICE_SERVERS_CUSTOM the App needs to discover the ICE urls on its own and provide them in a list to the SDK
-         List<Map<String, String>> iceServers = new ArrayList<Map<String, String>>();
-
-         // The ICE credentials below are fictional, not to be used
-         iceServers.add(RCConnection.createIceServerHashMap("stun:turn01.uswest.xirsys.com", "", ""));
-         iceServers.add(RCConnection.createIceServerHashMap("turn:turn01.uswest.xirsys.com:80?transport=udp", "412ff434-0c12-31b7-c722-3b25112266a1", "412ff434-0c12-31b7-c722-2aaf653ab121"));
-         // ...
-         params.put(RCDevice.ParameterKeys.MEDIA_ICE_SERVERS, iceServers);
-         */
-
-         params.put(RCDevice.ParameterKeys.SIGNALING_SECURE_ENABLED, prefs.getBoolean(RCDevice.ParameterKeys.SIGNALING_SECURE_ENABLED, true));
-
-         // The SDK provides the user with default sounds for calling, ringing, busy (declined) and message, but the user can override them
-         // by providing their own resource files (i.e. .wav, .mp3, etc) at res/raw passing them with Resource IDs like R.raw.user_provided_calling_sound
-         //params.put(RCDevice.ParameterKeys.RESOURCE_SOUND_CALLING, R.raw.user_provided_calling_sound);
-         //params.put(RCDevice.ParameterKeys.RESOURCE_SOUND_RINGING, R.raw.user_provided_ringing_sound);
-         //params.put(RCDevice.ParameterKeys.RESOURCE_SOUND_DECLINED, R.raw.user_provided_declined_sound);
-         //params.put(RCDevice.ParameterKeys.RESOURCE_SOUND_MESSAGE, R.raw.user_provided_message_sound);
-
-         // WARNING: These are for debugging purposes, NOT for production builds!
-         // DEBUG_JAIN_DISABLE_CERTIFICATE_VERIFICATION is handy when connecting to a testing/staging Restcomm Connect instance that typically has a self-signed certificate which is not acceptable by the client by default.
-         // With this setting we override that behavior to accept it. NOT for production!
-         //params.put(RCDevice.ParameterKeys.DEBUG_JAIN_DISABLE_CERTIFICATE_VERIFICATION, prefs.getBoolean(RCDevice.ParameterKeys.DEBUG_JAIN_DISABLE_CERTIFICATE_VERIFICATION, true));
-         //params.put(RCDevice.ParameterKeys.DEBUG_JAIN_SIP_LOGGING_ENABLED, prefs.getBoolean(RCDevice.ParameterKeys.DEBUG_JAIN_SIP_LOGGING_ENABLED, true));
-
+         // If exception is raised, we will close activity only if it comes from login
+         // otherwise we will just show the error dialog
          device.setLogLevel(Log.VERBOSE);
          try {
             device.initialize(getApplicationContext(), params, this);
          }
          catch (RCException e) {
-            showOkAlert("RCDevice Initialization Error", e.errorText);
+            showOkAlert("RCDevice Initialization Error", e.errorText, !isTaskRoot());
          }
       }
+      else {
+            device.setDeviceListener(this);
+            RCConnection connection = device.getLiveConnection();
+            if (connection != null) {
+               // we have a live connection ongoing, need to update UI so that it can be resumed
+               lblOngoingCall.setText(String.format("%s %s", getString(R.string.resume_ongoing_call_text), connection.getPeer()));
+               lblOngoingCall.setVisibility(View.VISIBLE);
+               startTimer();
+            }
+      }
+
 
       if (device.getState() == RCDevice.DeviceState.OFFLINE) {
          getSupportActionBar().setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.colorTextSecondary)));
@@ -395,38 +373,38 @@ public class MainActivity extends AppCompatActivity
    public void onClick(View view)
    {
       if (view.getId() == R.id.imageButton_add) {
-         /* TODO: Issue #380: once we figure out the issue with the backgrounding we need to uncomment this, but also place it to a suitable place
-         Intent intent = new Intent(this, CallActivity.class);
-         intent.setAction(RCDevice.LIVE_CALL);
-         startActivityForResult(intent, CONNECTION_REQUEST);
-         */
-         //DialogFragment newFragment = AddUserDialogFragment.newInstance(AddUserDialogFragment.DIALOG_TYPE_ADD_CONTACT, "", "");
-         //newFragment.show(getFragmentManager(), "dialog");
+         // TODO: Issue #380: once we figure out the issue with the backgrounding we need to uncomment this,
+         // but also place it to a suitable place :)
 
          AddUserDialogFragment newFragment = AddUserDialogFragment.newInstance(AddUserDialogFragment.DIALOG_TYPE_ADD_CONTACT, "", "");
          newFragment.show(getSupportFragmentManager(), "dialog");
-
-         // DEBUG: for adding memory pressure to the App
-         /*
-         for (int i = 0; i < 200; i++) {
-            list.add(new String[100000]);
-         }
-         Log.i(TAG, "List size: " + list.size());
-         */
       }
+      else if (view.getId() == R.id.resume_call) {
+         Intent intent = new Intent(this, CallActivity.class);
+         intent.setAction(RCDevice.ACTION_RESUME_CALL);
+         startActivity(intent);
+      }
+
    }
 
    /**
     * RCDeviceListener callbacks
     */
-   public void onStartListening(RCDevice device, RCDeviceListener.RCConnectivityStatus connectivityStatus)
+   public void onReconfigured(RCDevice device, RCConnectivityStatus connectivityStatus, int statusCode, String statusText)
    {
-      handleConnectivityUpdate(connectivityStatus, null);
+      Log.i(TAG, "%% onReconfigured");
+      if (statusCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         handleConnectivityUpdate(connectivityStatus, "RCDevice: " + statusText);
+      }
+      else {
+         handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice Error: " + statusText);
+      }
+
    }
 
-   public void onStopListening(RCDevice device, int errorCode, String errorText)
+   public void onError(RCDevice device, int errorCode, String errorText)
    {
-      Log.i(TAG, "%% onStopListening");
+      Log.i(TAG, "%% onError");
       if (errorCode == RCClient.ErrorCodes.SUCCESS.ordinal()) {
          handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice: " + errorText);
       }
@@ -446,11 +424,9 @@ public class MainActivity extends AppCompatActivity
          handleConnectivityUpdate(connectivityStatus, null);
       }
       else {
-         //Toast.makeText(getApplicationContext(), "RCDevice Initialization Error: " + statusText, Toast.LENGTH_LONG).show();
-         //showOkAlert("RCDevice Initialization Error", statusText);
-         //handleConnectivityUpdate(connectivityStatus, "RCDevice Initialization Error: " + statusText);
-         //Toast.makeText(getApplicationContext(), "RCDevice Initialization Error: " + statusText, Toast.LENGTH_LONG).show();
-         showOkAlert("RCDevice Initialization Error", statusText);
+         if (!isFinishing()) {
+            showOkAlert("RCDevice Initialization Error", statusText, false);
+         }
       }
    }
 
@@ -464,14 +440,26 @@ public class MainActivity extends AppCompatActivity
          handleConnectivityUpdate(RCConnectivityStatus.RCConnectivityStatusNone, "RCDevice Released: " + statusText);
       }
 
-      unbindService(this);
-      serviceBound = false;
+      //maybe we stopped the activity before onRelased is called
+      if (serviceBound) {
+         unbindService(this);
+         serviceBound = false;
+      }
    }
 
    public void onConnectivityUpdate(RCDevice device, RCConnectivityStatus connectivityStatus)
    {
       handleConnectivityUpdate(connectivityStatus, null);
    }
+
+/*
+   @Override
+   public void onWarning(RCDevice device, int statusCode, String statusText) {
+      if (statusCode != RCClient.ErrorCodes.SUCCESS.ordinal()) {
+         Toast.makeText(getApplicationContext(), "RCDevice Warning message: " + statusText, Toast.LENGTH_LONG).show();
+      }
+   }
+*/
 
    public void handleConnectivityUpdate(RCConnectivityStatus connectivityStatus, String text)
    {
@@ -583,17 +571,10 @@ public class MainActivity extends AppCompatActivity
       return super.onOptionsItemSelected(item);
    }
 
-   @Override
-   public void onSharedPreferenceChanged(SharedPreferences sharedPreferences,
-                                         String key)
-   {
-
-   }
-
    /**
     * Helpers
     */
-   private void showOkAlert(final String title, final String detail) {
+   private void showOkAlert(final String title, final String detail, final boolean close) {
       if (alertDialog.isShowing()) {
          Log.w(TAG, "Alert already showing, hiding to show new alert");
          alertDialog.hide();
@@ -604,12 +585,34 @@ public class MainActivity extends AppCompatActivity
       alertDialog.setButton(AlertDialog.BUTTON_NEUTRAL, "OK", new DialogInterface.OnClickListener() {
          public void onClick(DialogInterface dialog, int which) {
             dialog.dismiss();
+            if (close){
+               MainActivity.this.finish();
+            }
          }
       });
-      if (!MainActivity.this.isFinishing()) {
-         alertDialog.show();
-      }
+
+      alertDialog.show();
+
    }
+
+   public void startTimer() {
+      timerHandler.removeCallbacksAndMessages(null);
+      // schedule a registration update after 'registrationRefresh' seconds
+      Runnable timerRunnable = new Runnable() {
+         @Override
+         public void run() {
+            if (device != null && device.isInitialized() && (device.getLiveConnection() == null)) {
+               if (lblOngoingCall.getVisibility() != View.GONE) {
+                  lblOngoingCall.setVisibility(View.GONE);
+                  return;
+               }
+            }
+            startTimer();
+         }
+      };
+      timerHandler.postDelayed(timerRunnable, 1000);
+   }
+
 
 /*   private RCDevice.MediaIceServersDiscoveryType iceServersDiscoveryTypeString2Enum(String iceServersDiscoveryTypeString)
    {

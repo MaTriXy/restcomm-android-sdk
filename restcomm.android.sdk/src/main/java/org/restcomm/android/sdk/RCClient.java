@@ -60,6 +60,10 @@ public final class RCClient {
       ERROR_DEVICE_REGISTER_SERVICE_UNAVAILABLE,
       ERROR_DEVICE_REGISTER_UNTRUSTED_SERVER,
       ERROR_DEVICE_FAILED_TO_START_NETWORKING,
+      ERROR_DEVICE_REGISTER_INTENT_CALL_MISSING,
+      ERROR_DEVICE_REGISTER_INTENT_MESSAGE_MISSING,
+      ERROR_DEVICE_SIGNALING_FACILITIES_ALREADY_INITIALIZED,
+      ERROR_DEVICE_SIGNALING_DOMAIN_INVALID,
 
       ERROR_CONNECTION_AUTHENTICATION_FORBIDDEN,
       ERROR_CONNECTION_DEVICE_NOT_READY,
@@ -102,6 +106,25 @@ public final class RCClient {
       ERROR_MESSAGE_SERVICE_UNAVAILABLE,
       ERROR_MESSAGE_UNTRUSTED_SERVER,
       ERROR_MESSAGE_SEND_FAILED_DEVICE_OFFLINE,
+
+      ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_SID_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_CLIENT_SID_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_CREDENTIALS_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_BINDING_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_APPLICATION_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_FCM_SERVER_KEY_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_APPLICATION_NAME_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_EMAIL_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_PASSWORD_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_PUSH_DOMAIN_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_RESTCOMM_DOMAIN_MISSING,
+      ERROR_DEVICE_PUSH_NOTIFICATION_ENABLE_DISABLE_PUSH_NOTIFICATION,
+      ERROR_DEVICE_PUSH_NOTIFICATION_INVALID_HTTP_DOMAIN,
+      ERROR_DEVICE_PUSH_NOTIFICATION_INVALID_PUSH_DOMAIN,
+      ERROR_DEVICE_PUSH_NOTIFICATION_UNKNOWN_ERROR,
+      ERROR_DEVICE_PUSH_NOTIFICATION_AUTHENTICATION_FORBIDDEN,
+      ERROR_DEVICE_PUSH_NOTIFICATION_HTTP_NOT_FOUND,
+      ERROR_DEVICE_PUSH_NOTIFICATION_TIMED_OUT
    }
 
    /**
@@ -168,7 +191,7 @@ public final class RCClient {
          return "Device could not connect to Service";
       }
       else if (errorCode == ErrorCodes.ERROR_DEVICE_REGISTER_URI_INVALID) {
-         return "Register Domain URI is invalid";
+         return "Device register domain URI is invalid";
       }
       else if (errorCode == ErrorCodes.ERROR_DEVICE_REGISTER_SERVICE_UNAVAILABLE) {
          return "Device failed to register; service unavailable";
@@ -178,6 +201,18 @@ public final class RCClient {
       }
       else if (errorCode == ErrorCodes.ERROR_DEVICE_FAILED_TO_START_NETWORKING) {
          return "Device networking facilities failed to start; please check if signaling port is already in use";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_REGISTER_INTENT_CALL_MISSING) {
+         return "Device networking facilities failed to start; please check if intent for call is missing.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_REGISTER_INTENT_MESSAGE_MISSING) {
+         return "Device networking facilities failed to start; please check if intent for message is missing.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_SIGNALING_FACILITIES_ALREADY_INITIALIZED) {
+         return "Device initialization failed; siginaling facilities already intialized";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_SIGNALING_DOMAIN_INVALID) {
+         return "Device signaling domain is invalid";
       }
 
       else if (errorCode == ErrorCodes.ERROR_CONNECTION_AUTHENTICATION_FORBIDDEN) {
@@ -301,6 +336,60 @@ public final class RCClient {
       }
       else if (errorCode == ErrorCodes.ERROR_MESSAGE_SEND_FAILED_DEVICE_OFFLINE) {
          return "Failed to send message; RCDevice is offline";
+      }
+      else  if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_SID_MISSING) {
+          return "Failed to register/update for push notification; Account sid cannot be found";
+      }
+      else  if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_CLIENT_SID_MISSING) {
+          return "Failed to register/update for push notification; Client sid cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_CREDENTIALS_MISSING){
+          return "Failed to register/update for push notification; Credentials cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_BINDING_MISSING) {
+         return "Failed to register/update for push notification; Binding cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_APPLICATION_MISSING){
+         return "Failed to register/update for push notification; Application cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_FCM_SERVER_KEY_MISSING){
+         return "Failed to register/update for push notification; fcm server key cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_APPLICATION_NAME_MISSING){
+         return "Failed to register/update for push notification; Application name cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_EMAIL_MISSING){
+         return "Failed to register/update for push notification; Account email cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_ACCOUNT_PASSWORD_MISSING){
+         return "Failed to register/update for push notification; Account password cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_PUSH_DOMAIN_MISSING){
+         return "Failed to register/update for push notification; Push domain cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_RESTCOMM_DOMAIN_MISSING){
+         return "Failed to register/update for push notification; Restcomm Connect Domain cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_ENABLE_DISABLE_PUSH_NOTIFICATION){
+         return "Failed to register/update for push notification; Enable/Disable for push cannot be found";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_INVALID_HTTP_DOMAIN){
+         return "Failed to register/update for push notification; Invalid http domain.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_INVALID_PUSH_DOMAIN){
+         return "Failed to register/update for push notification; Invalid push domain.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_UNKNOWN_ERROR){
+         return "Failed to register/update for push notification; Unknown error.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_AUTHENTICATION_FORBIDDEN){
+         return "Failed to register/update for push notification; Could not authenticate.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_HTTP_NOT_FOUND){
+         return "Failed to register/update for push notification; Http 404 not found.";
+      }
+      else if (errorCode == ErrorCodes.ERROR_DEVICE_PUSH_NOTIFICATION_TIMED_OUT){
+         return "Failed to register/update for push notification; Request timed out.";
       }
 
       return "Unmapped Restcomm Client error: " + errorCode;
